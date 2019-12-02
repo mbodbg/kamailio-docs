@@ -1,0 +1,16 @@
+# References #
+
+* Kamailio Home Page - [https://www.kamailio.org](https://www.kamailio.org)
+* ASIPTO Home Page - [https://www.asipto.com](https://www.asipto.com)
+* Kamailio Dokuwiki Page  - [https://www.kamailio.org/wiki"](https://www.kamailio.org/wiki)
+* Kamailio Documentation Repository - [https://www.kamailio.org/w/documentation/](https://www.kamailio.org/w/documentation/)
+* Kamailio Modules Documentation - [https://www.kamailio.net/docs/modules](https://www.kamailio.net/docs/modules)
+* Kamailio KEMI Framework - [https://kamailio.org/docs/tutorials/devel/kamailio-kemi-framework/](https://kamailio.org/docs/tutorials/devel/kamailio-kemi-framework/)
+* Kamailio Core CookBbook - [https://www.kamailio.org/wiki/cookbooks/5.3.2.x/core](https://www.kamailio.org/wiki/cookbooks/5.3.x/core)
+* Kamailio and Asterisk Realtime Integration - [https://kb.asipto.com/asterisk:realtime:kamailio-3.1.x-asterisk-1.6.2-astdb](https://kb.asipto.com/asterisk:realtime:kamailio-3.1.x-asterisk-1.6.2-astdb)
+* Kamailio and FreeSWITCH Integration - [https://kb.asipto.com/freeswitch:kamailio-3.1.x-freeswitch-1.0.6d-sbc](https://kb.asipto.com/freeswitch:kamailio-3.1.x-freeswitch-1.0.6d-sbc)
+* Kamailio GIT Repository [https://github.com/kamailio/kamailio/](https://github.com/kamailio/kamailio/)
+* Kamailio Issues - [https://github.com/kamailio/kamailio/issues](https://github.com/kamailio/kamailio/issues)
+* Kamailio Users Mailing List - [https://lists.sip-router.org/cgi-bin/mailman/listinfo/sr-users](https://lists.sip-router.org/cgi-bin/mailman/listinfo/sr-users)
+* Kamailio Devel Mailing List - [https://lists.sip-router.org/cgi-bin/mailman/listinfo/sr-dev](https://lists.sip-router.org/cgi-bin/mailman/listinfo/sr-dev)
+* SIP RFC 3261 - [https://www.ietf.org/rfc/rfc3261.txt](https://www.ietf.org/rfc/rfc3261.txt)

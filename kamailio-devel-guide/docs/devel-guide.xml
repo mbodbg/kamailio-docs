@@ -1,0 +1,78 @@
+# Kamailio SIP Server v5.3.0 Development Guide #
+
+This book documents the internal architecture of Kkamailio SIP
+Server, providing the details useful to develop extensions in the
+core or as a module.
+
+The focus will be on major components of the SIP server, such as
+memory manager, locking system, parser, database API,
+configuration file, MI commands, pseudo-variables
+and module interface.
+
+Examples, API and the architecture are based on current stable
+version of Kamailio - <emphasis role="strong">3.2.0</emphasis> -
+at October 30, 2011. It is also valid for development version
+- <emphasis role="strong">3.3.0</emphasis> - at this date. 
+The document will be timely updated accordingly, check for
+updates at <ulink url="http://www.asipto.com">www.asipto.com</ulink> or
+<ulink url="http://www.kamailio.org">www.kamailio.org</ulink>.
+
+This document is free to use for anybody. The authors are not
+liable in any way for the consequences you may get due to usage
+of this document.
+
+		<firstname>Daniel-Constantin</firstname>
+		<surname>Mierla</surname>
+		<email><ulink url="http://www.asipto.com">http://www.asipto.com</ulink></email>
+		<address>
+			<affiliation>
+			<orgname>ASIPTO</orgname>
+			</affiliation>
+			<otheraddr>
+			<ulink url="http://www.asipto.com">http://www.asipto.com</ulink>
+			</otheraddr>
+		</address>
+	    </author>
+	    <author>
+		<firstname>Elena-Ramona</firstname>
+		<surname>Modroiu</surname>
+		<email><ulink url="http://www.asipto.com">http://www.asipto.com</ulink></email>
+		<address>
+			<affiliation>
+			<orgname>ASIPTO</orgname>
+			</affiliation>
+			<otheraddr>
+			<ulink url="http://www.asipto.com">http://www.asipto.com</ulink>
+			</otheraddr>
+		</address>
+	    </author>
+	</authorgroup>
+	<copyright>
+	    <year>2019</year>
+		<holder><ulink url="http://www.asipto.com">ASIPTO</ulink></holder>
+	</copyright>
+    </bookinfo>
+    <toc></toc>
+	
+    &c01intro;
+    &c02architecture;
+    &c03locking;
+    &c04memory;
+	&c05datastruct;
+	&c06sipparser;
+	&c07transport;
+	&c08config;
+	&c09database;
+	&c10rpc;
+	&c11pv;
+	&c12transformations;
+	&c13statistics;
+	&c14datalump;
+	&c15timer;
+	&c16moduledev;
+	&c17libdev;
+	&c18licensing;
+	&c19references;
+	&c20contact;
+
+</book>

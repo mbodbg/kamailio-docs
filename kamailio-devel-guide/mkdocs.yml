@@ -1,0 +1,22 @@
+site_name: Kamailio Developer Documentation
+theme: readthedocs
+extra_css: [extra.css]
+nav:
+    - 'Test': 'index.md'
+    - 'Introduction': 'introduction/introduction.md'
+    - 'Architecture': 'architecture/architecture.md' 
+    - 'Locking': 'locking/locking.md'
+    - 'Memory': 'memory/memory.md'
+    - 'Datastruct': 'datastruct/datastruct.md'
+    - 'Sipparser': 'sipparser/sipparser.md'
+    - 'Transport': 'transport/transport.md'
+    - 'Config': 'config/config.md'
+    - 'Database': 'database/database.md'
+    - 'Rpc Interface': 'rpc/rpc.md'
+    - 'Pseudo Variables': 'pv/pv.md'
+    - 'Transformations': 'transformations/transformations.md'
+    - 'Statistics': 'statistics/statistics.md'
+    - 'Datalump': 'datalump/datalump.md'
+    - 'Timer': 'timer/timer.md'
+    - 'References': 'references.md'
+    - 'Contact': 'contact.md' 

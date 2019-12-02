@@ -1,0 +1,1304 @@
+# Module Development #
+
+The easiest way to write extensions for &kamailio; is to extend existing modules or create new ones. Most of the features
+vailable in the configuration file are exported via module functions.
+
+Kamailio; modules in a pretty simple concept, are objects that export a set of parameters to control the
+internals and a set of functions that can be used in the configuration file. In fact, they are shared library files.
+
+There are no modules to be automatically loaded, the configuration file must explicitly include the directive to
+load a module.
+
+    ...
+    loadmodule "/path/to/module.so"
+    ...
+
+Each module has to export a structure <emphasis role="strong">struct module_exports</emphasis> with the name <emphasis role="strong">exports</emphasis>.
+
+## module_exports type ##
+
+The main structure that has to be exported by a module. It is defined in file <emphasis role="strong">sr_module.h</emphasis>.
+
+## module_exports definition ##
+
+    ...
+    struct module_exports{
+	char* name;                     /* null terminated module name */
+	unsigned int dlflags;           /* flags for dlopen */
+	
+	cmd_export_t* cmds;             /* null terminated array of the exported
+	                                   commands */
+	param_export_t* params;         /* null terminated array of the exported
+	                                   module parameters */
+
+	stat_export_t* stats;           /* null terminated array of the exported
+	                                   module statistics */
+
+	mi_export_t* mi_cmds;           /* null terminated array of the exported
+	                                   MI functions */
+
+	pv_export_t* items;             /* null terminated array of the exported
+	                                   module items (pseudo-variables) */
+
+	proc_export_t* procs;           /* null terminated array of the additional
+	                                   processes reqired by the module */
+
+	init_function init_f;           /* Initialization function */
+	response_function response_f;   /* function used for responses,
+	                                   returns yes or no; can be null */
+	destroy_function destroy_f;     /* function called when the module should
+	                                   be "destroyed", e.g: on kamailio exit */
+	child_init_function init_child_f;/* function called by all processes
+	                                    after the fork */
+    };
+    ...
+
+The comments in the definition are explanatory, each internal structure and data type is detailed in the next
+sections.
+
+Starting with version 3.0, there are two module interfaces: one specific to Kamailio flavour and the other
+one specific for SER flavour. A third one will merge the two in the near future. At this moment, each
+module has to specify in the Makefile what kind of interface implements. In this chapter, the focus is on
+writing modules implementing Kamailio specific module interface.
+
+## cmd_export_t type ##
+
+The structure corresponds to a function exported by modules
+
+    ...
+    struct cmd_export_ {
+        char* name;             /* null terminated command name */
+	cmd_function function;  /* pointer to the corresponding function */
+	int param_no;           /* number of parameters used by the function */
+	fixup_function fixup;   /* pointer to the function called to "fix" the
+							   parameters */
+	free_fixup_function
+				free_fixup; /* pointer to the function called to free the
+							   "fixed" parameters */
+	int flags;              /* Function flags */
+    };
+    typedef struct cmd_export_ cmd_export_t;
+    ...
+
+Flags can be a bit mask of:
+
+* REQUEST_ROUTE - the function can be used in request route blocks
+* FAILURE_ROUTE - the function can be used in failure_route blocks
+* ONREPLY_ROUTE - the function can be used in onreply_route blocks
+* BRANCH_ROUTE  - the function can be used in branch_route blocks
+* ONSEND_ROUTE  - the function can be used in onsend_route block
+* ANY_ROUTE  - the function can be used in any route block
+
+## param_export_t type ##
+The structure specifies a parameter exported by a module.
+
+    ...
+    struct param_export_ {
+	char* name;             /* null terminated param. name */
+	modparam_t type;        /* param. type */
+	void* param_pointer;    /* pointer to the param. memory location or to function to set the parameter */
+    };
+    typedef struct param_export_ param_export_t;
+    ...
+
+The type can be:
+
+* STR_PARAM  - parameter takes a string value
+* INT_PARAM - parameter takes an integer value
+* USE_FUNC_PARAM - this must be used in combination with one from the above. Means that internally there is
+		a function called every time the parameter is set, instead of setting the value to a variable.
+
+When using <emphasis role="strong">USE_FUNC_PARAM</emphasis> flag, the <emphasis role="strong">param_pointer</emphasis>
+must be set to a function with the following type:
+
+    ...
+    typedef int (*param_func_t)( modparam_t type, void* val);
+    ...
+
+Parameters are:
+
+* type - the type of value set to the parameter in the config file
+* val - pointer to the value set in the configuration file
+* The function has to return <emphasis role="strong">0</emphasis> in case of success.
+
+# proc_export_t type #
+This field is no longer active, it is kept for no-error at compilation time during
+transition period and will be removed in the future. To create new application
+processes, you have to use a two steps mechanism that ensures inheriting proper
+TCP/TLS handling.
+
+First you have to declare in mod_init() how many processes you want to start, the
+fork new processes in init_child() for RANK_PROC_MAIN:
+
+    ...
+    <![CDATA[
+    static int mod_init(void)
+    {
+        ...
+        /* add space for one extra process */
+        register_procs(1);
+        ...
+    }	
+    ...
+    static int child_init(int rank)
+    {
+        int pid;
+    
+    ...
+        if (rank==PROC_MAIN) {
+            pid=fork_process(PROC_NOCHLDINIT, "MY PROC DESCRIPTION", 1);
+                if (pid<0)
+                    return -1; /* error */
+                if(pid==0){
+                    /* child */
+    
+                    /* initialize the config framework */
+                        if (cfg_child_init())
+                            return -1;
+    
+                    my_process_main_function(...);
+            }
+        }
+    ...
+    
+    return 0;
+    }
+    ]]>
+    ...
+
+register_procs(no) takes as parameter the number of processes to be created.
+fork_process(...) takes as parameters: flag specifying wheter to execute
+child_init() functions for the new process; string with description of
+the process; flag specifying whether to create internal unix sockets or not
+for the new process (needed for TCP/TLS communication, use 1 to be safe always).
+
+Typical module implementations for such functionality are the MI transports module. They require a special process
+to listen to the MI transport layer.
+
+## stat_export_t type ##
+
+The structure allow to export statistics variables from your module.
+
+    ...
+    typedef struct stat_export_ {
+        char* name;                /* null terminated statistic name */
+        int flags;                 /* flags */
+        stat_var** stat_pointer;   /* pointer to the variable's mem location *
+                                * NOTE - it's in shm mem */
+    } stat_export_t;
+    ...
+
+This field is currently in passive mode inside module_exports structure. You have
+to explicitely register the statistics inside mod_init() via register_module_stats().
+For example in <emphasis role="strong">modules_k/msilo</emphasis>:
+    ...
+
+    <![CDATA[
+    stat_export_t msilo_stats[] = {
+        {"stored_messages" ,  0,  &ms_stored_msgs  },
+        {"dumped_messages" ,  0,  &ms_dumped_msgs  },
+        {"failed_messages" ,  0,  &ms_failed_msgs  },
+        {"dumped_reminders" , 0,  &ms_dumped_rmds  },
+        {"failed_reminders" , 0,  &ms_failed_rmds  },
+        {0,0,0}
+    };
+    ...
+    static int mod_init(void)
+    {
+        ...
+        /* register statistics */
+        if (register_module_stats( exports.name, msilo_stats)!=0 ) {
+            LM_ERR("failed to register core statistics\n");
+            return -1;
+     }
+    ...
+    }
+...
+
+## pv_export_t</title> ##
+
+The structure to export pseudo-variables from module. See the chapter
+<emphasis role="strong">Pseudo Variables</emphasis> for detailed description.
+
+    ...
+    typedef struct _pv_export {
+        str name;                      /* class name of PV */
+        pv_type_t type;                /* type of PV */
+        pv_getf_t  getf;               /* function to get the value */
+        pv_setf_t  setf;               /* function to set the value */
+        pv_parse_name_f parse_name;    /* function to parse the inner name */
+        pv_parse_index_f parse_index;  /* function to parse the index of PV */
+        pv_init_param_f init_param;    /* function to init the PV spec */
+        int iparam;                    /* parameter for the init function */
+    } pv_export_t;
+    ...
+
+An example of module that exports pseudo-variables is
+<emphasis role="strong">modules/mqueue</emphasis>:
+
+    ...
+    static pv_export_t mod_pvs[] = {
+        { {"mqk", sizeof("mqk")-1}, PVT_OTHER, pv_get_mqk, 0,
+            pv_parse_mqk_name, 0, 0, 0 },
+        { {"mqv", sizeof("mqv")-1}, PVT_OTHER, pv_get_mqv, 0,
+            pv_parse_mqv_name, 0, 0, 0 },
+        { {0, 0}, 0, 0, 0, 0, 0, 0, 0 }
+    };
+    ...
+    struct module_exports exports = {
+        "mqueue",
+        DEFAULT_DLFLAGS, /* dlopen flags */
+        cmds,
+        params,
+        0,
+        0,              /* exported MI functions */
+        mod_pvs,        /* exported pseudo-variables */
+        0,              /* extra processes */
+        mod_init,       /* module initialization function */
+        0,              /* response function */
+        mod_destroy,    /* destroy function */
+        0               /* per child init function */
+    };
+    ...
+
+## Functions Types ##
+
+These are the types of functions used in the structure <emphasis role="strong">module_exports</emphasis>.
+
+    ...
+    typedef  int (*cmd_function)(struct sip_msg*, char*, char*, char*, char*, char*, char*);
+    typedef  int (*fixup_function)(void** param, int param_no);
+    typedef  int (*free_fixup_function)(void** param, int param_no);
+    typedef  int (*response_function)(struct sip_msg*);
+    typedef void (*destroy_function)();
+    typedef int (*init_function)(void);
+    typedef int (*child_init_function)(int rank);
+    ...
+
+Description:
+
+* cmd_function - is the type for functions implementing the commands exported to configuration file
+* fixup_function - is the type for function to be used to pre-compile the parameters at startup
+* free_fixup_function - is the type for function to be used to free the structure resulted after pre-compile processing
+* response_function - is the type for the functions to be register to automatically be called when a SIP
+reply is received by &kamailio;
+* destroy_function - is the type for the function to be executed at shut down time, to clean up the resources
+used during run time (e.g., shared memory, locks, connections to database)
+init_function - is the type for the function to be executed at start up, before forking children processes
+*child_init_function - is the type for the function to be executed for each children process, immediately after forking
+
+## Command Functions ##
+
+These are the functions implemented by the module that can be invoked from the configuration file. It has a strict
+prototype. First parameter is the pointer to structure with the current processed SIP message. Next are
+<emphasis role="strong">char*</emphasis>. Most existing command functions have up to two 
+<emphasis role="strong">char*</emphasis> parameters, recent extensions allow up to six such parameters.
+
+It means that in the configuration file you can give only <emphasis role="strong">char*</emphasis> values as
+parameter. &kamailio; provides the mechanisms to convert the values to something more meaningful for the module,
+during &kamailio; start up, via <emphasis role="strong">fixup functions</emphasis>.
+
+When calling from the configuration file, the structure <emphasis role="strong">sip_msg</emphasis> is not given
+as parameter, it is added by the config interpreter when calling the C function. The name of the function available
+in the configuration file may be different that the name of the C function. There can be different C functions behind
+the same config file function, when the number of the parameters is different.
+## Return Values</title> ##
+
+Returning values from the command functions have a special meaning in the configuration file. The command functions
+return an integer value, and the config file interpreter use it as follows:
+
+* <emphasis role="strong">if &lt;0</emphasis> - evaluation of the return code is FALSE
+* <emphasis role="strong">if 0</emphasis> - the interpreter stop executing the configuration file
+*<emphasis role="strong">if &gt;0</emphasis> - evaluation of the return code is TRUE
+
+##Fixup Functions ##
+
+As the parameters of the functions exported by modules to configuration file are strings, converting the parameters
+to internal structures every time a module function is executed is not optimal. Most of the functions do not
+need the parameters as a string, but as integer, pseudo-variable names or pseudo-variables values, or even more
+complex structures.
+
+Here are the fixup functions. These functions convert from plain null-terminated strings to what the developer
+needs. Such a function gets a pointer to the initial value and the index of the parameter for that function. Inside
+it the value can processed and replaced with a new structure.
+
+Next is a fixup function that converts the string value given in configuration file to an unsigned integer.
+
+    ...
+    <![CDATA[
+    int fixup_uint(void** param)
+    {
+        unsigned int ui;
+        str s;
+    
+        s.s = (char*)*param;
+        s.len = strlen(s.s);
+        if(str2int(&s, &ui)==0)
+        {
+                pkg_free(*param);
+                *param=(void *)(unsigned long)ui;
+                return 0;
+        }
+        LM_ERR("bad number <%s>\n", (char *)(*param));
+        return E_CFG;
+    }
+
+    /**
+     * fixup for functions that get one parameter
+     * - first parameter is converted to unsigned int
+    */
+    int fixup_uint_null(void** param, int param_no)
+    {
+        if(param_no != 1)
+        {
+            LM_ERR("invalid parameter number %d\n", param_no);
+            return E_UNSPEC;
+        }
+        return fixup_uint(param);
+    }
+    ]]>
+    ...
+
+<emphasis role="strong">fixup_uint(...)</emphasis> is a helper function,
+<emphasis role="strong">fixup_uint_null(...)</emphasis> is a fixup function that can be used for config
+function that get one <emphasis role="strong">char*</emphasis> parameter that need to be interpreted
+as unsigned integer.
+
+The files <emphasis role="strong">mod_fix.{c,h}</emphasis> implement a set of common fixup functions you
+can. Check that files before implementing a new fixup function.
+
+Recent work is focusing to add free fixup functions, that will help to clean up properly at shut down and
+use exported functions dynamically at run time from linked applications.
+
+# Developing a new module #
+
+Here we show the steps to develop new modules, exemplifying with code from different modules.
+
+Prior starting writing code, check with developers whether that functionality is already implemented. Also try to
+identify whether the extension fits better in an existing module or needs to be created a new one.
+
+## Naming the module ##
+
+The first decision to be taken. It must be suggestive for the functionality. There are some rules to be
+followed when implementing certain modules.
+
+* when writing a DB driver module, the module name should start with <emphasis role="strong">db_</emphasis>.
+* when writing a MI transport, the module name should start with <emphasis role="strong">mi_</emphasis>
+* when writing a Presence Server extension, the name should start with <emphasis role="strong">presence_</emphasis>
+* when writing a PUA extension, the name should start with <emphasis role="strong">pua_</emphasis>
+
+The rules are enforced for coherence in grouping related functionalities.
+Create the directory for your new module.
+
+    ...
+    mkdir modules/my_new_module
+    ...
+## Module Makefile ##
+
+Source code for a module has to be placed in a directory inside subfolders: modules, modules_k or modules_s.
+In each module directory you have to create a Makefile that specify the dependencies of the module (e.g.,
+compile flags and internal/external linking libraries) as well as module interface type. 
+
+For example, <emphasis role="strong">modules_k/regex</emphasis> implements Kamailio module
+interface and depends on external libpcre library and internal kmi library. Its Makefile
+looks like:
+    ...
+    include ../../Makefile.defs
+    auto_gen=
+    NAME=regex.so
+    
+    BUILDER = $(shell which pcre-config)
+    
+    ifeq ($(BUILDER),)
+        PCREDEFS=-I$(LOCALBASE)/include -I/usr/local/include -I/opt/include \
+        -I/usr/sfw/include
+        PCRELIBS=-L$(LOCALBASE)/lib -L/usr/local/lib -L/usr/sfw/lib \
+        -L/opt/lib -lpcre
+    else
+        PCREDEFS = $(shell pcre-config --cflags)
+        PCRELIBS = $(shell pcre-config --libs)
+    endif
+    
+    DEFS+=$(PCREDEFS)
+    LIBS=$(PCRELIBS)
+    
+    DEFS+=-DOPENSER_MOD_INTERFACE
+    
+    SERLIBPATH=../../lib
+    SER_LIBS+=$(SERLIBPATH)/kmi/kmi
+    include ../../Makefile.modules
+    ...
+
+The NAME is specifying the name of shared object file for module. Follows a section
+where it tries to discover the location of external shared library libpcre and its
+compile time flags. These are added to Makefile variables DEFS and LIBS. To the DEFS
+variable has to be added also the type of interface - for &kamailio; this is
+<emphasis role="strong">-DOPENSER_MOD_INTERFACE</emphasis>. For SER module interface
+it is <emphasis role="strong">-DSER_MOD_INTERFACE</emphasis>.
+
+The internal library dependencies are provided via SER_LIBS variable, as a space separated
+list of the paths to libraries. In this case it is a dependency on library kmi, located
+at ../../lib/kmi/.
+
+First and last lines include common Makefiles needed to build the core and modules - they
+have to be preserved as they are in this example.
+
+A very simple and pretty standard template to start building you module Makefile:
+
+    ...
+    include ../../Makefile.defs
+    auto_gen=
+    NAME=my_new_module.so
+    LIBS=
+
+    DEFS+=-DOPENSER_MOD_INTERFACE
+
+    include ../../Makefile.modules
+    ...
+## Main File ##
+
+The main file of the modules is where you place the structure <emphasis role="strong">module_exports</emphasis>.
+The common naming formats are:
+* my_new_module.c
+* my_new_module_mod.c
+
+In this file you must include the macro <emphasis role="strong">MODULE_VERSION</emphasis> to allow &kamailio;
+to detect whether core and the module are same version and compiled with same flags. You just simply add next line
+after all header files includes.
+
+    ...
+    MODULE_VERSION
+    ...
+## Add Module Parameter ##
+
+In the configuration file, can be set integer or string values for a module parameter. The type is specified
+in the <emphasis role="strong">param_export_t</emphasis> structure.
+
+We exemplify the parameters exported by the modules <emphasis role="strong">modules_k/cfgutils</emphasis>
+and <emphasis role="strong">modules_k/pv</emphasis> - showing one integer parameter, one string parameter
+and another string parameter that is set via a function.
+
+For the parameters stored directly in a variable, you have to declare C variables of type
+<emphasis role="strong">int</emphasis> or <emphasis role="strong">char*</emphasis>.
+
+    ...
+    static int initial = 10;
+    
+    static char* hash_file = NULL;
+    
+    static param_export_t params[]={ 
+    ...
+    {"initial_probability", INT_PARAM, &amp;initial},
+    {"hash_file",           STR_PARAM, &amp;hash_file        },
+    ...
+    {"shvset",              STR_PARAM|USE_FUNC_PARAM, (void*)param_set_shvar },
+    ...
+    {0,0,0}
+};
+
+    ...
+In the config, one can set many times the value for a parameter. In case of parameters stored in a variable, the
+last one is taken. For those that use a function, it is up to the implementation what to do with each value.
+Actually here is the real benefit of using a function.
+
+The <emphasis role="strong">param_set_shvar(...)</emphasis> function sets the initial value for a shared config
+file variable <emphasis role="strong">$shv(name)</emphasis>. The function is implemented in the file
+<emphasis role="strong">modules_k/pv/pv_shv.c</emphasis>. Check the readme of the module to see the format
+of the parameter value - it includes the name of the shared variable as well as the value. So the function
+parses the value given from the configuration file, splits in name and value and store in a local structure.
+   ...
+    <![CDATA[
+    int param_set_xvar( modparam_t type, void* val, int mode)
+    {
+        str s;
+        char *p;
+        int_str isv;
+        int flags;
+        int ival;
+        script_var_t *pkv;
+        sh_var_t *shv;
+    
+        if(!shm_initialized()!=0)
+        {
+            LM_ERR("shm not initialized - cannot set value for PVs\n");
+                goto error;
+        }
+    
+        s.s = (char*)val;
+        if(s.s == NULL || s.s[0] == '\0')
+            goto error;
+    
+        p = s.s;
+        while(*p && *p!='=') p++;
+    
+        if(*p!='=')
+            goto error;
+    
+        s.len = p - s.s;
+        if(s.len == 0)
+            goto error;
+        p++;
+        flags = 0;
+        if(*p!='s' && *p!='S' && *p!='i' && *p!='I')
+            goto error;
+    
+        if(*p=='s' || *p=='S')
+            flags = VAR_VAL_STR;
+        p++;
+        if(*p!=':')
+            goto error;
+        p++;
+        isv.s.s = p;
+        isv.s.len = strlen(p);
+        if(flags != VAR_VAL_STR) {
+            if(str2sint(&isv.s, &ival)<0)
+                goto error;
+                isv.n = ival;
+        }
+        if(mode==0) {
+            pkv = add_var(&s);
+            if(pkv==NULL)
+                goto error;
+                if(set_var_value(pkv, &isv, flags)==NULL)
+                    goto error;
+        } else {
+            shv = add_shvar(&s);
+            if(shv==NULL)
+                goto error;
+                if(set_shvar_value(shv, &isv, flags)==NULL)
+                    goto error;
+        }
+    
+        return 0;
+    error:
+        LM_ERR("unable to set shv parame [%s]\n", s.s);
+        return -1;
+    }
+
+int param_set_shvar( modparam_t type, void* val)
+{
+	return param_set_xvar(type, val, 1);
+}
+]]>
+...
+			</programlisting>
+			<para>
+				So, actually, setting the parameter <emphasis role="strong">setshv</emphasis> for module
+				<emphasis role="strong">pv</emphasis> produces a set of operations behind.
+			</para>
+			<programlisting  format="linespecific">
+...
+modparam("pv", "shvset", "debug=i:1")
+...
+			</programlisting>
+			<para>
+				By setting the parameter as above results in a variable <emphasis role="strong">$shv(debug)</emphasis> initialized
+				to <emphasis role="strong">1</emphasis>.
+			</para>
+		</section>
+		<section id="c16_mod_init">
+			<title>Module Init Function</title>
+			<para>
+				The function is executed after setting the module parameters, config file is parsed completely, shared memory and
+				locking system are initialized.
+			</para>
+			<para>
+				The main purpose of this function is to check the sanity of the module parameter, load data from storage systems,
+				initialize the structured to be used at runtime. Here is the example from modules_k/cfgutils module:
+			</para>
+			<programlisting  format="linespecific">
+...
+<![CDATA[
+static int mod_init(void)
+{
+	if(register_mi_mod(exports.name, mi_cmds)!=0)
+	{
+		LM_ERR("failed to register MI commands\n");
+		return -1;
+	}
+
+	if (!hash_file) {
+		LM_INFO("no hash_file given, disable hash functionality\n");
+	} else {
+		if (MD5File(config_hash, hash_file) != 0) {
+			LM_ERR("could not hash the config file");
+			return -1;
+		}
+		LM_DBG("config file hash is %.*s", MD5_LEN, config_hash);
+	}
+
+	if (initial_prob > 100) {
+		LM_ERR("invalid probability <%d>\n", initial_prob);
+		return -1;
+	}
+	LM_DBG("initial probability %d percent\n", initial_prob);
+
+	probability=(int *) shm_malloc(sizeof(int));
+
+	if (!probability) {
+		LM_ERR("no shmem available\n");
+		return -1;
+	}
+	*probability = initial_prob;
+
+	gflags=(unsigned int *) shm_malloc(sizeof(unsigned int));
+	if (!gflags) {
+		LM_ERR(" no shmem available\n");
+		return -1;
+	}
+	*gflags=initial_gflags;
+	if(_cfg_lock_size>0 && _cfg_lock_size<=10)
+	{
+		_cfg_lock_size = 1<<_cfg_lock_size;
+		_cfg_lock_set = lock_set_alloc(_cfg_lock_size);
+		if(_cfg_lock_set==NULL || lock_set_init(_cfg_lock_set)==NULL)
+		{
+			LM_ERR("cannot initiate lock set\n");
+			return -1;
+		}
+	}
+	return 0;
+}
+]]>
+...
+			</programlisting>
+			<para>
+				First in the function is registering MI commands and then is the handling of the config hashing.
+				If the appropriate parameter is not set, it is initialized to the config file used by &kamailio;.
+				Then is computed the hash value that will be used for
+				comparison, later at runtime. Next is checking the probability parameter and create the variable in share memory
+				to store it. At the end it initializes the variables for global flags and lock sets.
+			</para>
+			<para>
+				The module init function must return <emphasis role="strong">0</emphasis> in case of success.
+			</para>
+		</section>
+		<section id="c16_child_init">
+			<title>Module Child Init Function</title>
+			<para>
+				This is the function called just after &kamailio; forks its worker processes. If &kamailio; is set in non-fork
+				module, the function is called for the main process after calling the module init function.
+			</para>
+			<para>
+				In this function must be added the operations that has to be taken for each worker or special processes only
+				once during the runtime, at the start up time. Example of such operations are to open the connection to
+				database, set the intial values for local variables per process.
+			</para>
+			<para>
+				The function gets as parameter the rank of the child process. The rank is a positive number if it is a worker
+				process and negative for special processes like timer processes or TCP attendant. The defines with these
+				special ranks are in file <emphasis role="strong">sr_module.h</emphasis>.
+			</para>
+			<para>
+				As an example, we show the <emphasis role="strong">child_init</emphasis> function of the module
+				<emphasis role="strong">speeddial</emphasis>. The operations there are for opening the connection to database.
+			</para>
+			<programlisting  format="linespecific">
+...
+<![CDATA[
+static int child_init(int rank)
+{
+	if (rank==PROC_INIT || rank==PROC_MAIN || rank==PROC_TCP_MAIN)
+		return 0; /* do nothing for the main process */
+
+	db_handle = db_funcs.init(&db_url);
+	if (!db_handle)
+	{
+		LM_ERR("failed to connect database\n");
+		return -1;
+	}
+	return 0;
+
+}
+]]>
+...
+			</programlisting>
+			<para>
+				The child init function must return <emphasis role="strong">0</emphasis> in case of success.
+			</para>
+		</section>
+		<section id="c16_mod_destroy">
+			<title>Module Destroy Function</title>
+			<para>
+				It is the function to be called when &kamailio; is stopped. The main purpose is to clean up the resources created
+				and used at initialization and/or runtime. For the module <emphasis role="strong">cfgutils</emphasis> means to
+				free the variable allocated in shared memory for keeping the probability and destroying the global flags
+				and lock sets.
+			</para>
+			<programlisting  format="linespecific">
+...
+static void mod_destroy(void)
+{
+	if (probability)
+		shm_free(probability);
+	if (gflags)
+		shm_free(gflags);
+	if(_cfg_lock_set!=NULL)
+	{
+		lock_set_destroy(_cfg_lock_set);
+		lock_set_dealloc(_cfg_lock_set);
+	}
+}
+...
+			</programlisting>
+		</section>
+		<section id="c16_add_cmd_function">
+			<title>Add Command Function</title>
+			<para>
+				The module <emphasis role="strong">cfgutils</emphasis> exports a functions stop and wait for a period of
+				time the execution of the configuration file. It is an interface the the standard C function
+				<emphasis role="strong">sleep(...)</emphasis>. Takes as parameter the number of the seconds to wait.
+			</para>
+			<para>
+				As the parameter is given as string, but it is actually an integer value, a fixup function is used. It is
+				in the list of the fixup functions exported by <emphasis role="strong">mod_fix.h</emphasis>. The fixup
+				function <emphasis role="strong">fixup_uint_null(...)</emphasis> is shown few sections above.
+			</para>
+			<programlisting  format="linespecific">
+...
+static cmd_export_t cmds[]={
+...
+	{"sleep",    (cmd_function)m_sleep,    1,      fixup_uint_null, 0, 
+			ANY_ROUTE},
+...
+	{0, 0, 0, 0, 0, 0}
+};
+...
+
+static int m_sleep(struct sip_msg *msg, char *time, char *str2)
+{
+	LM_DBG("sleep %lu seconds\n", (unsigned long)time);
+	sleep((unsigned int)(unsigned long)time);
+	return 1;
+}
+
+...
+			</programlisting>
+			<para>
+				In the C function, as shown in the above example, the fitst parameter is cased to integer, because the
+				fixup function replaced the original string value with the integer representation.
+			</para>
+			<para>
+				This function return all the time <emphasis role="strong">1</emphasis> (TRUE in the configuration file). The
+				function in C (<emphasis role="strong">m_sleep(...)</emphasis>) has a different name than the one that can be
+				used in the &kamailio; configuration file (<emphasis role="strong">sleep(...)</emphasis>). Next shows how this
+				function can be called in the configuration file to introduce a pause of 3 seconds.
+			</para>
+			<programlisting  format="linespecific">
+...
+sleep("3");
+...
+			</programlisting>
+		</section>
+		<section id="c16_add_pv">
+			<title>Add Pseudo-Variable</title>
+			<para>
+				The chapter dedicated to <emphasis role="strong">Pseudo Variables</emphasis> presents the structure
+				<emphasis role="strong">pv_export_t</emphasis>. When a module exports pseudo-variables, a null terminated
+				array of <emphasis role="strong">pv_export_t</emphasis> is included in the structure
+				<emphasis role="strong">module_exports</emphasis>.
+			</para>
+			<para>
+				The module <emphasis role="strong">pv</emphasis> exports most of the pseudo-variables. We will exemplify
+				with $time(name), showing how a class of pseudo-variables can have inner name. For that it exports the name
+				parsing function <emphasis role="strong">pv_parse_time_name(...)</emphasis>.
+			</para>
+			<para>
+				The name can be:
+			</para>
+			<itemizedlist>
+				<listitem>
+					<para>
+						sec - to return number of seconds
+					</para>
+				</listitem>
+				<listitem>
+					<para>
+						min - to return number of minutes
+					</para>
+				</listitem>
+				<listitem>
+					<para>
+						hour - to return the hour
+					</para>
+				</listitem>
+				<listitem>
+					<para>
+						mday - to return the day of month
+					</para>
+				</listitem>
+				<listitem>
+					<para>
+						mon - to return the month
+					</para>
+				</listitem>
+				<listitem>
+					<para>
+						year - to return the year
+					</para>
+				</listitem>
+				<listitem>
+					<para>
+						wday - to return the day of week
+					</para>
+				</listitem>
+				<listitem>
+					<para>
+						yday - to return the day of year
+					</para>
+				</listitem>
+				<listitem>
+					<para>
+						isdst - return daylight saving mode
+					</para>
+				</listitem>
+			</itemizedlist>
+			<para>
+				To increase the execution speed and not compare strings all the time, the name is kept internally
+				as integer. At runtime, depending on the value, the appropriate attribute is returned.
+			</para>
+			<programlisting  format="linespecific">
+...
+<![CDATA[
+static pv_export_t mod_items[] = {
+...
+	{ {"time", (sizeof("time")-1)}, 1002, pv_get_time,
+		0, pv_parse_time_name, 0, 0, 0},
+...
+	{ {0, 0}, 0, 0, 0, 0, 0, 0, 0 }
+};
+...
+int pv_parse_time_name(pv_spec_p sp, str *in)
+{
+	if(sp==NULL || in==NULL || in->len<=0)
+		return -1;
+
+	switch(in->len)
+	{
+		case 3: 
+			if(strncmp(in->s, "sec", 3)==0)
+				sp->pvp.pvn.u.isname.name.n = 0;
+			else if(strncmp(in->s, "min", 3)==0)
+				sp->pvp.pvn.u.isname.name.n = 1;
+			else if(strncmp(in->s, "mon", 3)==0)
+				sp->pvp.pvn.u.isname.name.n = 4;
+			else goto error;
+		break;
+		case 4: 
+			if(strncmp(in->s, "hour", 4)==0)
+				sp->pvp.pvn.u.isname.name.n = 2;
+			else if(strncmp(in->s, "mday", 4)==0)
+				sp->pvp.pvn.u.isname.name.n = 3;
+			else if(strncmp(in->s, "year", 4)==0)
+				sp->pvp.pvn.u.isname.name.n = 5;
+			else if(strncmp(in->s, "wday", 4)==0)
+				sp->pvp.pvn.u.isname.name.n = 6;
+			else if(strncmp(in->s, "yday", 4)==0)
+				sp->pvp.pvn.u.isname.name.n = 7;
+			else goto error;
+		break;
+		case 5: 
+			if(strncmp(in->s, "isdst", 5)==0)
+				sp->pvp.pvn.u.isname.name.n = 8;
+			else goto error;
+		break;
+		default:
+			goto error;
+	}
+	sp->pvp.pvn.type = PV_NAME_INTSTR;
+	sp->pvp.pvn.u.isname.type = 0;
+
+	return 0;
+
+error:
+	LM_ERR("unknown PV time name %.*s\n", in->len, in->s);
+	return -1;
+}
+...
+static struct tm _cfgutils_ts;
+static unsigned int _cfgutils_msg_id = 0;
+
+int pv_get_time(struct sip_msg *msg, pv_param_t *param,
+		pv_value_t *res)
+{
+	time_t t;
+
+	if(msg==NULL || param==NULL)
+		return -1;
+
+	if(_cfgutils_msg_id != msg->id)
+	{
+		pv_update_time(msg, &t);
+		_cfgutils_msg_id = msg->id;
+		if(localtime_r(&t, &_cfgutils_ts) == NULL)
+		{
+			LM_ERR("unable to break time to attributes\n");
+			return -1;
+		}
+	}
+	
+	switch(param->pvn.u.isname.name.n)
+	{
+		case 1:
+			return pv_get_uintval(msg, param, res, (unsigned int)_cfgutils_ts.tm_min);
+		case 2:
+			return pv_get_uintval(msg, param, res, (unsigned int)_cfgutils_ts.tm_hour);
+		case 3:
+			return pv_get_uintval(msg, param, res, (unsigned int)_cfgutils_ts.tm_mday);
+		case 4:
+			return pv_get_uintval(msg, param, res, 
+					(unsigned int)(_cfgutils_ts.tm_mon+1));
+		case 5:
+			return pv_get_uintval(msg, param, res,
+					(unsigned int)(_cfgutils_ts.tm_year+1900));
+		case 6:
+			return pv_get_uintval(msg, param, res, 
+					(unsigned int)(_cfgutils_ts.tm_wday+1));
+		case 7:
+			return pv_get_uintval(msg, param, res, 
+					(unsigned int)(_cfgutils_ts.tm_yday+1));
+		case 8:
+			return pv_get_sintval(msg, param, res, _cfgutils_ts.tm_isdst);
+		default:
+			return pv_get_uintval(msg, param, res, (unsigned int)_cfgutils_ts.tm_sec);
+	}
+}
+]]>
+...
+			</programlisting>
+			<para>
+				Functions in pseudo-variable API return 0 in case of success and &lt;0 in case of error.
+			</para>
+		</section>
+		<section id="c16_add_mi_command">
+			<title>Add MI Command</title>
+			<para>
+				MI commands exported by a module are in a null-terminated array of structures
+				<emphasis role="strong">mi_export_t</emphasis>, include in <emphasis role="strong">module_exports</emphasis>. 
+			</para>
+			<para>
+				One of the MI commands exported by module <emphasis role="strong">pv</emphasis> is the
+				<emphasis role="strong">shv_set</emphasis>. It can be used to set the value of a shared variable via MI. The
+				command takes three parameters: name of the shared variable, the type of the value and the value. The C
+				wrapper of the command is the function <emphasis role="strong">mi_shvar_set(...)</emphasis>.
+			</para>
+			<programlisting  format="linespecific">
+...
+<![CDATA[
+static mi_export_t mi_cmds[] = {
+...
+	{ "shv_set" ,      mi_shvar_set,  0,                 0,  0 },
+...
+	{ 0, 0, 0, 0, 0}
+};
+
+struct mi_root* mi_shvar_set(struct mi_root* cmd_tree, void* param)
+{
+	str sp;
+	str name;
+	int ival;
+	int_str isv;
+	int flags;
+	struct mi_node* node;
+	sh_var_t *shv = NULL;
+
+	node = cmd_tree->node.kids;
+	if(node == NULL)
+		return init_mi_tree( 400, MI_SSTR(MI_MISSING_PARM_S));
+	name = node->value;
+	if(name.len<=0 || name.s==NULL)
+	{
+		LM_ERR("bad shv name\n");
+		return init_mi_tree( 500, MI_SSTR("bad shv name"));
+	}
+	shv = get_shvar_by_name(&name);
+	if(shv==NULL)
+		return init_mi_tree(404, MI_SSTR("Not found"));
+
+	node = node->next;
+	if(node == NULL)
+		return init_mi_tree(400, MI_SSTR(MI_MISSING_PARM_S));
+	sp = node->value;
+	if(sp.s == NULL)
+		return init_mi_tree(500, MI_SSTR("type not found"));
+	flags = 0;
+	if(sp.s[0]=='s' || sp.s[0]=='S')
+		flags = VAR_VAL_STR;
+
+	node= node->next;
+	if(node == NULL)
+		return init_mi_tree(400, MI_SSTR(MI_MISSING_PARM_S));
+
+	sp = node->value;
+	if(sp.s == NULL)
+	{
+		return init_mi_tree(500, MI_SSTR("value not found"));
+	}
+	if(flags == 0)
+	{
+		if(str2sint(&sp, &ival))
+		{
+			LM_ERR("bad integer value\n");
+			return init_mi_tree( 500, MI_SSTR("bad integer value"));
+		}
+		isv.n = ival;
+	} else {
+		isv.s = sp;
+	}
+
+	lock_shvar(shv);
+	if(set_shvar_value(shv, &isv, flags)==NULL)
+	{
+		unlock_shvar(shv);
+		LM_ERR("cannot set shv value\n");
+		return init_mi_tree( 500, MI_SSTR("cannot set shv value"));
+	}
+
+	unlock_shvar(shv);
+	LM_DBG("$shv(%.*s) updated\n", name.len, name.s);
+	return init_mi_tree( 200, MI_OK_S, MI_OK_LEN);
+}
+]]>
+...
+			</programlisting>
+			<para>
+				The command returns the code <emphasis role="strong">200</emphasis> in case of success.
+			</para>
+		</section>
+		<section id="c16_add_extra_process">
+			<title>Add Extra Process</title>
+			<para>
+				It happens to need worker processed that do a different job than handling the SIP traffic. It is the case for
+				the MI transport modules or the xmpp gateway. These processes listen on an input stream different than the SIP
+				ports.
+			</para>
+			<para>
+				The next example is
+				from module <emphasis role="strong">xmpp</emphasis>. The function will start the process that is listening on a 
+				pipe for messages coming from SIP side and create connections to the XMPP servers. Based on configuration
+				option, the module will act as a XMPP component or server. Remember that you have to declare how many
+				new processes you want to start in mod_init() and use fork_process() in child_init() to effectively start
+				the new processes.
+			</para>
+			<programlisting  format="linespecific">
+...
+<![CDATA[
+static proc_export_t procs[] = {
+	{"XMPP receiver",  0,  0, xmpp_process, 1 },
+	{0,0,0,0,0}
+};
+...
+static void xmpp_process(int rank)
+{
+	/* if this blasted server had a decent I/O loop, we'd
+	 * just add our socket to it and connect().
+	 */
+	close(pipe_fds[1]);
+
+	LM_DBG("started child connection process\n");
+	if (!strcmp(backend, "component"))
+		xmpp_component_child_process(pipe_fds[0]);
+	else if (!strcmp(backend, "server"))
+		xmpp_server_child_process(pipe_fds[0]);
+}
+...
+/**
+ * initialize module
+ */
+static int mod_init(void) {
+	...
+	/* add space for one extra process */
+	register_procs(1);
+	...
+}
+...
+/**
+ * initialize child processes
+ */
+static int child_init(int rank)
+{
+	int pid;
+
+	if (rank==PROC_MAIN) {
+		pid=fork_process(PROC_NOCHLDINIT, "XMPP Manager", 1);
+		if (pid<0)
+			return -1; /* error */
+		if(pid==0){
+			/* child */
+			/* initialize the config framework */
+			if (cfg_child_init())
+				return -1;
+
+			xmpp_process(1);
+		}
+	}
+
+	return 0;
+}
+]]>
+...
+			</programlisting>
+			<para>
+				The function gets as parameter the rank of the process.
+			</para>
+		</section>
+		<section id="c16cfgutils_module_exports">
+			<title>CFGUTILS module_exports</title>
+			<para>
+				The structure <emphasis role="strong">module_exports</emphasis> of the module
+				<emphasis role="strong">cfgutils</emphasis> includes some of the structures detailed in the examples
+				seen in the previous sections.
+			</para>
+			<programlisting  format="linespecific">
+...
+struct module_exports exports = {
+	"cfgutils",
+	DEFAULT_DLFLAGS, /* dlopen flags */
+	cmds,        /* exported functions */
+	params,      /* exported parameters */
+	0,           /* exported statistics */
+	mi_cmds,     /* exported MI functions */
+	mod_items,   /* exported pseudo-variables */
+	0,           /* extra processes */
+	mod_init,    /* module initialization function */
+	0,           /* response function*/
+	mod_destroy, /* destroy function */
+	0            /* per-child init function */
+};
+...
+			</programlisting>
+		</section>
+	</section>
+	<section id="c16_migrate_1x_3x">
+		<title>Upgrading modules from v1.x to v3.x</title>
+		<para>
+			Between version 1.5 and 3.0, there were major refactorings inside the code, as part
+			Kamailio and SER source code integration, several of them affecting the existing modules.
+			If you had some internally developed modules, in this chapter you can find the hints
+			that should make the upgrade easier.
+		</para>
+		<para>
+			Three changes affected the old Kamailio modules:
+			<itemizedlist>
+				<listitem>
+					<para>
+						support for many module interfaces - each module write can choose what
+						module interface to implement and export
+					</para>
+				</listitem>
+				<listitem>
+					<para>
+						support for internal libraries - code that usually resided in the core, but
+						was not for general purpose, just shared by several modules, can be now
+						part of an internal library
+					</para>
+				</listitem>
+				<listitem>
+					<para>
+						several fields in module exports became passive - this is a result of moving
+						some code in internal libraries, thus they are not handled by the core anymore
+					</para>
+				</listitem>
+			</itemizedlist>
+		</para>
+		<para>
+			Since you developed the module for Kamailio v1.x, it is clear you have implemented the
+			Kamailio-specific module interface. What you need to do: edit module Makefile and add
+			-DOPENSER_MOD_INTERFACE to DEFS variable:
+		</para>
+			<programlisting  format="linespecific">
+...
+DEFS+=-DOPENSER_MOD_INTERFACE
+...
+			</programlisting>
+		<para>
+			Some examples of code that was during the past in core and now is part of internal libraries:
+		</para>
+			<itemizedlist>
+				<listitem>
+					<para>
+						Database API
+					</para>
+				</listitem>
+				<listitem>
+					<para>
+						MI API
+					</para>
+				</listitem>
+				<listitem>
+					<para>
+						Statistics API
+					</para>
+				</listitem>
+				<listitem>
+					<para>
+						Helper functions for SIP message parsing
+					</para>
+				</listitem>
+			</itemizedlist>
+		<para>
+			To get your module compiling, you have to update the paths to include directives. Internal libraries
+			are located in directories inside <emphasis role="strong">lib/</emphasis>.
+			For example, what was in v1.x as:
+		</para>
+			<programlisting  format="linespecific">
+...
+#include "../../db/db.h"
+...
+			</programlisting>
+		<para>
+			is in v3.x:
+		</para>
+			<programlisting  format="linespecific">
+...
+#include "../../lib/srdb1/db.h"
+...
+			</programlisting>
+		<para>
+			You may need also to update the names of data structures and types, or API functions.
+		</para>
+		<para>
+			In the Makefile, you have to list the interal library dependencies. For example, a module that
+			connects to database and exports MI commands has in Makefile:
+		</para>
+			<programlisting  format="linespecific">
+...
+SERLIBPATH=../../lib
+SER_LIBS+=$(SERLIBPATH)/srdb1/srdb1
+SER_LIBS+=$(SERLIBPATH)/srdb1/kmi
+SER_LIBS+=$(SERLIBPATH)/kcore/kcore
+
+...
+			</programlisting>
+		<para>
+			Internal <emphasis role="strong">kcore</emphasis> library collects code from old v1.x that didn't
+			meet the requirements of the new architecture for the core v3.x. It also includes the code for
+			statistics API - it most of the cases, you may need to link old Kamailio modules to it.
+		</para>
+		<para>
+			Regarding the passive fields in the module exports, practically they are:
+		</para>
+			<itemizedlist>
+				<listitem>
+					<para>
+						MI commands
+					</para>
+				</listitem>
+				<listitem>
+					<para>
+						Extra processes
+					</para>
+				</listitem>
+				<listitem>
+					<para>
+						Statistics
+					</para>
+				</listitem>
+			</itemizedlist>
+		<para>
+			To get them registered to the core framework, you have to use now dedicated functions in mod_init() and
+			child_init(). See the specific chapters in this guide that approach these topics for real examples of how
+			to do it for each one.
+		</para>
+	</section>
+</chapter>
